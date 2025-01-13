@@ -21,15 +21,16 @@ def get_extension(path):
 	""" Return the extension of the file targeted by path. """
 	return path[path.rfind('.'):]
 
-def find_all_files(path, recursive=True):
-	""" 
+def find_all_files(path, ignore, recursive=True):
+	"""
 	Return a list of all the files in the folder.
 	If recursive is True, the function will search recursively.
 	"""
 	files = []
 	for entry in os.scandir(path):
 		if entry.is_dir() and recursive:
-			files += find_all_files(entry.path)
+			if entry.name not in ignore:
+				files += find_all_files(entry.path, ignore)
 		elif get_extension(entry.path) in valid_extensions:
 			files.append(entry.path)
 	return files
@@ -41,14 +42,20 @@ def find_neighbors(path):
 	f.close()
 	return [normalize(include) for include in include_regex.findall(code)]
 
-def create_graph(folder, create_cluster, label_cluster, strict):
+def create_graph(folder, create_cluster, label_cluster, strict, recursive, ignore):
 	""" Create a graph from a folder. """
 	# Find nodes and clusters
-	files = find_all_files(folder)
+	files = find_all_files(folder, ignore, recursive=recursive)
 	folder_to_files = defaultdict(list)
 	for path in files:
-		folder_to_files[os.path.dirname(path)].append(path)
-	nodes = {normalize(path) for path in files}
+		dir_name = os.path.dirname(path)
+		if dir_name not in ignore:
+			folder_to_files[dir_name].append(path)
+	nodes = []
+	for path in files:
+		normalized_path = normalize(path)
+		if normalized_path not in ignore:
+			nodes.append(normalized_path)
 	# Create graph
 	graph = Digraph(strict=strict)
 	# Find edges and create clusters
@@ -57,6 +64,8 @@ def create_graph(folder, create_cluster, label_cluster, strict):
 			for path in folder_to_files[folder]:
 				color = 'black'
 				node = normalize(path)
+				if node not in nodes:
+					continue
 				ext = get_extension(path)
 				if ext in valid_headers[0]:
 					color = valid_headers[1]
@@ -84,7 +93,10 @@ if __name__ == '__main__':
 	parser.add_argument('-c', '--cluster', action='store_true', help='Create a cluster for each subfolder')
 	parser.add_argument('--cluster-labels', dest='cluster_labels', action='store_true', help='Label subfolder clusters')
 	parser.add_argument('-s', '--strict', action='store_true', help='Rendering should merge multi-edges', default=False)
+	parser.add_argument('-r', '--recursive', action='store_true', help='Recursively parse sub-folders', default=False)
+	parser.add_argument('-i', '--ignore', action='append', help='Ignore file or folder', default=[])
 	args = parser.parse_args()
-	graph = create_graph(args.folder, args.cluster, args.cluster_labels, args.strict)
+	normalized_ignore = [normalize(path) for path in args.ignore]
+	graph = create_graph(args.folder, args.cluster, args.cluster_labels, args.strict, args.recursive, normalized_ignore)
 	graph.format = args.format
 	graph.render(args.output, cleanup=True, view=args.view)
